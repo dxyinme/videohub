@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Video Hub</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <div class="layout">
+    <header class="header">
+      <h1>Video Hub</h1>
+      <p class="subtitle">本地 MP4 浏览与播放</p>
+    </header>
+
+    <main class="main">
+      <section class="player-panel">
+        <h2 id="now-playing">未选择视频</h2>
+        <video id="player" controls playsinline></video>
+      </section>
+
+      <section class="list-panel">
+        <div class="list-head">
+          <h2>视频列表</h2>
+          <button type="button" id="refresh" class="btn">刷新</button>
+        </div>
+        <form id="upload-form" class="upload-form">
+          <label class="upload-label">
+            <span>上传 MP4</span>
+            <input id="file-input" type="file" accept="video/mp4,.mp4" required />
+          </label>
+          <button type="submit" id="upload-btn" class="btn">上传</button>
+        </form>
+        <p id="upload-status" class="status" aria-live="polite"></p>
+        <p id="status" class="status" aria-live="polite">加载中…</p>
+        <ul id="video-list" class="video-list"></ul>
+      </section>
+    </main>
+  </div>
+  <script src="/app.js"></script>
+</body>
+</html>

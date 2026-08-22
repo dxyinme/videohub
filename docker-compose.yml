@@ -1,0 +1,18 @@
+services:
+  videohub:
+    build: .
+    image: videohub:latest
+    ports:
+      - "18888:8080"
+    environment:
+      VIDEOHUB_ADDR: ":8080"
+      VIDEOHUB_VIDEO_DIR: "/videos"
+      VIDEOHUB_SCAN_DEPTH: "0"
+      VIDEOHUB_LIST_CACHE_SEC: "5"
+      VIDEOHUB_MAX_UPLOAD_MB: "2048"
+      # 与宿主机用户一致，保证对 ./videos 可写
+      PUID: "1000"
+      PGID: "1000"
+    volumes:
+      # 读写挂载，支持页面/API 上传
+      - ./videos:/videos:rw

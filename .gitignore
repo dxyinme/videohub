@@ -1,0 +1,5 @@
+testvideos/
+videos/
+*.mp4
+/videohub
+/bin/
