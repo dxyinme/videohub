@@ -176,16 +176,21 @@ func (l *Library) Invalidate() {
 	l.cacheErr = nil
 }
 
-// Save writes an uploaded MP4 into the video root using a sanitized basename.
-// If the target name already exists, a numeric suffix is appended.
+// Save writes an uploaded MP4 into the video root.
+// filename may be a basename or a relative path (e.g. "movies/a.mp4");
+// parent directories are created as needed. If the target exists, a numeric suffix is appended.
 func (l *Library) Save(filename string, r io.Reader) (Video, error) {
-	name, err := sanitizeUploadName(filename)
+	rel, err := sanitizeUploadRelPath(filename)
 	if err != nil {
 		return Video{}, err
 	}
 
-	dest := uniquePath(l.root, name)
-	tmp, err := os.CreateTemp(l.root, ".upload-*.tmp")
+	dest := uniquePath(l.root, rel)
+	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+		return Video{}, fmt.Errorf("create upload dir: %w", err)
+	}
+
+	tmp, err := os.CreateTemp(filepath.Dir(dest), ".upload-*.tmp")
 	if err != nil {
 		return Video{}, fmt.Errorf("create temp file: %w", err)
 	}
@@ -212,50 +217,73 @@ func (l *Library) Save(filename string, r io.Reader) (Video, error) {
 	cleanup = false
 	l.Invalidate()
 
-	rel, err := filepath.Rel(l.root, dest)
+	outRel, err := filepath.Rel(l.root, dest)
 	if err != nil {
 		return Video{}, err
 	}
-	rel = filepath.ToSlash(rel)
+	outRel = filepath.ToSlash(outRel)
 	return Video{
-		ID:   rel,
+		ID:   outRel,
 		Name: filepath.Base(dest),
-		Path: rel,
+		Path: outRel,
 		Size: written,
 	}, nil
 }
 
-func sanitizeUploadName(filename string) (string, error) {
+// sanitizeUploadRelPath accepts a basename or slash-separated relative path under the video root.
+func sanitizeUploadRelPath(filename string) (string, error) {
 	name := strings.TrimSpace(filename)
 	name = strings.ReplaceAll(name, "\\", "/")
-	name = filepath.Base(name)
-	name = strings.TrimSpace(name)
-	if name == "" || name == "." || name == ".." || strings.HasPrefix(name, ".") {
+	name = strings.Trim(name, "/")
+	if name == "" {
 		return "", ErrInvalidName
 	}
-	if strings.ContainsAny(name, "/\\") {
-		return "", ErrInvalidName
-	}
-	if !strings.EqualFold(filepath.Ext(name), ".mp4") {
-		return "", ErrNotMP4
-	}
-	for _, r := range name {
-		if r < 32 || !unicode.IsPrint(r) {
+
+	parts := strings.Split(name, "/")
+	clean := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" || part == "." {
+			continue
+		}
+		if part == ".." || strings.HasPrefix(part, ".") {
 			return "", ErrInvalidName
 		}
+		for _, r := range part {
+			if r < 32 || !unicode.IsPrint(r) {
+				return "", ErrInvalidName
+			}
+		}
+		clean = append(clean, part)
 	}
-	return name, nil
+	if len(clean) == 0 {
+		return "", ErrInvalidName
+	}
+	if !strings.EqualFold(filepath.Ext(clean[len(clean)-1]), ".mp4") {
+		return "", ErrNotMP4
+	}
+	return strings.Join(clean, "/"), nil
 }
 
-func uniquePath(root, name string) string {
-	candidate := filepath.Join(root, name)
+// uniquePath returns an absolute path under root for rel (slash-separated).
+// If the path exists, inserts _N before the extension.
+func uniquePath(root, rel string) string {
+	candidate := filepath.Join(root, filepath.FromSlash(rel))
 	if _, err := os.Stat(candidate); os.IsNotExist(err) {
 		return candidate
 	}
-	ext := filepath.Ext(name)
-	stem := strings.TrimSuffix(name, ext)
+	dir := filepath.ToSlash(filepath.Dir(rel))
+	base := filepath.Base(rel)
+	ext := filepath.Ext(base)
+	stem := strings.TrimSuffix(base, ext)
 	for i := 1; ; i++ {
-		candidate = filepath.Join(root, fmt.Sprintf("%s_%d%s", stem, i, ext))
+		name := fmt.Sprintf("%s_%d%s", stem, i, ext)
+		if dir == "." {
+			rel = name
+		} else {
+			rel = dir + "/" + name
+		}
+		candidate = filepath.Join(root, filepath.FromSlash(rel))
 		if _, err := os.Stat(candidate); os.IsNotExist(err) {
 			return candidate
 		}

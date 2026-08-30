@@ -26,9 +26,14 @@
         </div>
         <form id="upload-form" class="upload-form">
           <label class="upload-label">
-            <span>上传 MP4</span>
-            <input id="file-input" type="file" accept="video/mp4,.mp4" required />
+            <span>选择文件（可多选）</span>
+            <input id="file-input" type="file" accept="video/mp4,.mp4" multiple />
           </label>
+          <label class="upload-label">
+            <span>选择文件夹（自动筛选 MP4）</span>
+            <input id="folder-input" type="file" webkitdirectory directory multiple />
+          </label>
+          <p id="selection-hint" class="status">未选择文件</p>
           <button type="submit" id="upload-btn" class="btn">上传</button>
         </form>
         <p id="upload-status" class="status" aria-live="polite"></p>

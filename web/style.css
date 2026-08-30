@@ -114,7 +114,7 @@ body {
   display: flex;
   flex-wrap: wrap;
   gap: 0.6rem;
-  align-items: center;
+  align-items: flex-end;
   margin-bottom: 0.75rem;
 }
 
@@ -130,6 +130,12 @@ body {
 .upload-label input {
   color: var(--text);
   font: inherit;
+  max-width: 100%;
+}
+
+#selection-hint {
+  flex: 1 1 100%;
+  margin: 0;
 }
 
 .status {

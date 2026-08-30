@@ -75,7 +75,11 @@ func TestSaveUpload(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	v, err := lib.Save("../evil/../clip.mp4", strings.NewReader("data1"))
+	if _, err := lib.Save("../evil/../clip.mp4", strings.NewReader("data1")); err == nil {
+		t.Fatal("expected path escape rejection")
+	}
+
+	v, err := lib.Save("clip.mp4", strings.NewReader("data1"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -91,6 +95,17 @@ func TestSaveUpload(t *testing.T) {
 		t.Fatalf("expected unique name, got %#v", v2)
 	}
 
+	nested, err := lib.Save("movies/action/a.mp4", strings.NewReader("nest"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if nested.ID != "movies/action/a.mp4" {
+		t.Fatalf("expected nested path, got %#v", nested)
+	}
+	if _, err := os.Stat(filepath.Join(root, "movies", "action", "a.mp4")); err != nil {
+		t.Fatal(err)
+	}
+
 	if _, err := lib.Save("note.txt", strings.NewReader("x")); err == nil {
 		t.Fatal("expected non-mp4 rejection")
 	}
@@ -99,7 +114,7 @@ func TestSaveUpload(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(videos) != 2 {
+	if len(videos) != 3 {
 		t.Fatalf("list after upload: %#v", videos)
 	}
 }

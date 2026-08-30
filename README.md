@@ -39,7 +39,7 @@ docker compose up --build
 
 - `GET /api/health` — 健康检查
 - `GET /api/videos` — 视频列表
-- `POST /api/videos` — 上传 MP4（`multipart` 字段 `file`）
+- `POST /api/videos` — 上传 MP4（`multipart` 字段 `file`，可选 `path` 保留相对目录）
 - `GET /api/stream/{id...}` — MP4 流（支持 Range）
 
 > 无鉴权，请仅在受信任的内网使用，勿直接暴露公网。

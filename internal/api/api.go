@@ -84,8 +84,9 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var (
-		video library.Video
-		found bool
+		video   library.Video
+		found   bool
+		relPath string
 	)
 	for {
 		part, err := reader.NextPart()
@@ -101,11 +102,25 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		if part.FormName() != "file" {
+		switch part.FormName() {
+		case "path":
+			// Optional relative path (FileName() strips directories per RFC 7578).
+			raw, readErr := io.ReadAll(io.LimitReader(part, 4<<10))
+			_ = part.Close()
+			if readErr != nil {
+				http.Error(w, "invalid path field", http.StatusBadRequest)
+				return
+			}
+			relPath = strings.TrimSpace(string(raw))
+			continue
+		case "file":
+			// handled below
+		default:
 			_, _ = io.Copy(io.Discard, io.LimitReader(part, 1<<20))
 			_ = part.Close()
 			continue
 		}
+
 		if found {
 			_ = part.Close()
 			http.Error(w, `only one "file" field is allowed`, http.StatusBadRequest)
@@ -113,7 +128,10 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 		}
 		found = true
 
-		filename := part.FileName()
+		filename := relPath
+		if filename == "" {
+			filename = part.FileName()
+		}
 		limited := &io.LimitedReader{R: part, N: s.maxUploadBytes + 1}
 		video, err = s.lib.Save(filename, limited)
 		// Drain any unread bytes so the multipart parser stays consistent.

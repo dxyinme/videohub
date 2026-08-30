@@ -127,11 +127,14 @@ web/                   # 前端静态文件 + embed.FS
 
 #### `POST /api/videos`
 
-- `Content-Type: multipart/form-data`，字段 `file`
-- 仅接受扩展名为 `.mp4` 的文件；文件名经 `filepath.Base` 净化，禁止路径穿越
-- 写入视频根目录；同名时自动追加 `_1`、`_2`…
+- `Content-Type: multipart/form-data`
+  - 字段 `file`：文件内容（必填）
+  - 字段 `path`：可选相对路径（如 `movies/a.mp4`）；因 RFC 7578，`FileName()` 会去掉目录，故用独立字段保留文件夹结构
+- 仅接受扩展名为 `.mp4` 的文件；`path`/`filename` 经净化，禁止 `..` 与隐藏段
+- 写入视频根目录（可含子目录，自动 `MkdirAll`）；同名时自动追加 `_1`、`_2`…
 - 成功：`201` + `{"video": {...}}`；超限：`413`；非法文件名/类型：`400`
 - 上传成功后失效列表缓存
+- 前端支持多选文件与选择文件夹，自动筛选其中的 `.mp4` 后逐个上传
 
 #### `GET /api/stream/{id...}`
 
