@@ -75,7 +75,11 @@ func TestSaveUpload(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	v, err := lib.Save("../evil/../clip.mp4", strings.NewReader("data1"))
+	if _, err := lib.Save("../evil/../clip.mp4", strings.NewReader("data1")); err == nil {
+		t.Fatal("expected path escape rejection")
+	}
+
+	v, err := lib.Save("clip.mp4", strings.NewReader("data1"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -91,6 +95,17 @@ func TestSaveUpload(t *testing.T) {
 		t.Fatalf("expected unique name, got %#v", v2)
 	}
 
+	nested, err := lib.Save("movies/action/a.mp4", strings.NewReader("nest"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if nested.ID != "movies/action/a.mp4" {
+		t.Fatalf("expected nested path, got %#v", nested)
+	}
+	if _, err := os.Stat(filepath.Join(root, "movies", "action", "a.mp4")); err != nil {
+		t.Fatal(err)
+	}
+
 	if _, err := lib.Save("note.txt", strings.NewReader("x")); err == nil {
 		t.Fatal("expected non-mp4 rejection")
 	}
@@ -99,7 +114,76 @@ func TestSaveUpload(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(videos) != 2 {
+	if len(videos) != 3 {
 		t.Fatalf("list after upload: %#v", videos)
+	}
+}
+
+func TestBrowseAndSearch(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "movies", "empty"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "root.mp4"), []byte("r"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "movies", "a.mp4"), []byte("aa"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "movies", "note.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	lib, err := New(root, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := lib.Browse("../etc"); err == nil {
+		t.Fatal("expected browse escape rejection")
+	}
+
+	rootBrowse, err := lib.Browse("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rootBrowse.Path != "" || rootBrowse.Parent != "" {
+		t.Fatalf("root paths: %#v", rootBrowse)
+	}
+	if len(rootBrowse.Folders) != 1 || rootBrowse.Folders[0].Path != "movies" {
+		t.Fatalf("root folders: %#v", rootBrowse.Folders)
+	}
+	if len(rootBrowse.Videos) != 1 || rootBrowse.Videos[0].ID != "root.mp4" {
+		t.Fatalf("root videos: %#v", rootBrowse.Videos)
+	}
+
+	movies, err := lib.Browse("movies")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if movies.Parent != "" {
+		t.Fatalf("movies parent: %q", movies.Parent)
+	}
+	if len(movies.Folders) != 1 || movies.Folders[0].Path != "movies/empty" {
+		t.Fatalf("movies folders: %#v", movies.Folders)
+	}
+	if len(movies.Videos) != 1 || movies.Videos[0].ID != "movies/a.mp4" {
+		t.Fatalf("movies videos: %#v", movies.Videos)
+	}
+
+	empty, err := lib.Browse("movies/empty")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if empty.Parent != "movies" || len(empty.Folders) != 0 || len(empty.Videos) != 0 {
+		t.Fatalf("empty dir: %#v", empty)
+	}
+
+	hits, err := lib.Search("a.mp4", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hits) != 1 || hits[0].ID != "movies/a.mp4" {
+		t.Fatalf("search: %#v", hits)
 	}
 }

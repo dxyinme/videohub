@@ -45,6 +45,8 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/health", s.handleHealth)
 	mux.HandleFunc("GET /api/videos", s.handleListVideos)
+	mux.HandleFunc("GET /api/browse", s.handleBrowse)
+	mux.HandleFunc("GET /api/search", s.handleSearch)
 	mux.HandleFunc("POST /api/videos", s.handleUpload)
 	// {id...} must be terminal in Go's ServeMux, so stream uses /api/stream/{id...}.
 	mux.HandleFunc("GET /api/stream/{id...}", s.handleStream)
@@ -73,6 +75,47 @@ func (s *Server) handleListVideos(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
+func (s *Server) handleBrowse(w http.ResponseWriter, r *http.Request) {
+	path := r.URL.Query().Get("path")
+	result, err := s.lib.Browse(path)
+	if err != nil {
+		if errors.Is(err, library.ErrOutsideRoot) {
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
+		}
+		if errors.Is(err, library.ErrNotDir) {
+			http.Error(w, "not a directory", http.StatusBadRequest)
+			return
+		}
+		if os.IsNotExist(err) {
+			http.NotFound(w, r)
+			return
+		}
+		log.Printf("browse %q: %v", path, err)
+		http.Error(w, "failed to browse", http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query().Get("q")
+	videos, err := s.lib.Search(q, 200)
+	if err != nil {
+		log.Printf("search %q: %v", q, err)
+		http.Error(w, "failed to search", http.StatusInternalServerError)
+		return
+	}
+	if videos == nil {
+		videos = []library.Video{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"query":  q,
+		"videos": videos,
+		"limit":  200,
+	})
+}
+
 func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 	// Cap total request body; stream parts with MultipartReader (no full-form buffer).
 	r.Body = http.MaxBytesReader(w, r.Body, s.maxUploadBytes+1024*1024) // multipart overhead
@@ -84,8 +127,9 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var (
-		video library.Video
-		found bool
+		video   library.Video
+		found   bool
+		relPath string
 	)
 	for {
 		part, err := reader.NextPart()
@@ -101,11 +145,25 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		if part.FormName() != "file" {
+		switch part.FormName() {
+		case "path":
+			// Optional relative path (FileName() strips directories per RFC 7578).
+			raw, readErr := io.ReadAll(io.LimitReader(part, 4<<10))
+			_ = part.Close()
+			if readErr != nil {
+				http.Error(w, "invalid path field", http.StatusBadRequest)
+				return
+			}
+			relPath = strings.TrimSpace(string(raw))
+			continue
+		case "file":
+			// handled below
+		default:
 			_, _ = io.Copy(io.Discard, io.LimitReader(part, 1<<20))
 			_ = part.Close()
 			continue
 		}
+
 		if found {
 			_ = part.Close()
 			http.Error(w, `only one "file" field is allowed`, http.StatusBadRequest)
@@ -113,7 +171,10 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 		}
 		found = true
 
-		filename := part.FileName()
+		filename := relPath
+		if filename == "" {
+			filename = part.FileName()
+		}
 		limited := &io.LimitedReader{R: part, N: s.maxUploadBytes + 1}
 		video, err = s.lib.Save(filename, limited)
 		// Drain any unread bytes so the multipart parser stays consistent.

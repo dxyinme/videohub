@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -16,6 +17,7 @@ import (
 var (
 	ErrOutsideRoot = errors.New("path escapes video root")
 	ErrNotFile     = errors.New("path is not a regular file")
+	ErrNotDir      = errors.New("path is not a directory")
 	ErrInvalidName = errors.New("invalid filename")
 	ErrNotMP4      = errors.New("only .mp4 uploads are allowed")
 )
@@ -26,6 +28,20 @@ type Video struct {
 	Name string `json:"name"`
 	Path string `json:"path"`
 	Size int64  `json:"size"`
+}
+
+// Folder is a subdirectory under the video root.
+type Folder struct {
+	Name string `json:"name"`
+	Path string `json:"path"`
+}
+
+// BrowseResult is one directory listing (Synology-style current folder).
+type BrowseResult struct {
+	Path    string   `json:"path"`
+	Parent  string   `json:"parent"`
+	Folders []Folder `json:"folders"`
+	Videos  []Video  `json:"videos"`
 }
 
 // Library scans and resolves videos under a root directory.
@@ -137,26 +153,10 @@ func (l *Library) scan() ([]Video, error) {
 
 // Resolve maps a video id (slash-separated relative path) to an absolute file path.
 func (l *Library) Resolve(id string) (string, error) {
-	id = strings.TrimSpace(id)
-	if id == "" {
-		return "", fmt.Errorf("%w: empty id", ErrOutsideRoot)
-	}
-	id = strings.ReplaceAll(id, "\\", "/")
-	id = strings.TrimPrefix(id, "/")
-	if id == ".." || strings.HasPrefix(id, "../") || strings.Contains(id, "/../") || strings.HasSuffix(id, "/..") {
-		return "", ErrOutsideRoot
-	}
-
-	joined := filepath.Join(l.root, filepath.FromSlash(id))
-	abs, err := filepath.Abs(joined)
+	abs, err := l.resolveWithinRoot(id, false)
 	if err != nil {
 		return "", err
 	}
-	rootWithSep := l.root + string(os.PathSeparator)
-	if abs != l.root && !strings.HasPrefix(abs, rootWithSep) {
-		return "", ErrOutsideRoot
-	}
-
 	info, err := os.Stat(abs)
 	if err != nil {
 		return "", err
@@ -165,6 +165,171 @@ func (l *Library) Resolve(id string) (string, error) {
 		return "", ErrNotFile
 	}
 	return abs, nil
+}
+
+// Browse lists folders and MP4 files in relPath (empty = root). Uses ReadDir only.
+func (l *Library) Browse(relPath string) (BrowseResult, error) {
+	rel, err := normalizeRelDir(relPath)
+	if err != nil {
+		return BrowseResult{}, err
+	}
+
+	abs, err := l.resolveWithinRoot(rel, true)
+	if err != nil {
+		return BrowseResult{}, err
+	}
+	info, err := os.Stat(abs)
+	if err != nil {
+		return BrowseResult{}, err
+	}
+	if !info.IsDir() {
+		return BrowseResult{}, ErrNotDir
+	}
+
+	entries, err := os.ReadDir(abs)
+	if err != nil {
+		return BrowseResult{}, err
+	}
+
+	result := BrowseResult{
+		Path:    rel,
+		Parent:  parentRel(rel),
+		Folders: []Folder{},
+		Videos:  []Video{},
+	}
+
+	for _, e := range entries {
+		name := e.Name()
+		if name == "." || name == ".." || strings.HasPrefix(name, ".") {
+			continue
+		}
+		childRel := name
+		if rel != "" {
+			childRel = rel + "/" + name
+		}
+		if e.IsDir() {
+			result.Folders = append(result.Folders, Folder{Name: name, Path: childRel})
+			continue
+		}
+		if !strings.EqualFold(filepath.Ext(name), ".mp4") {
+			continue
+		}
+		fi, infoErr := e.Info()
+		if infoErr != nil {
+			return BrowseResult{}, infoErr
+		}
+		result.Videos = append(result.Videos, Video{
+			ID:   childRel,
+			Name: name,
+			Path: childRel,
+			Size: fi.Size(),
+		})
+	}
+
+	sort.Slice(result.Folders, func(i, j int) bool {
+		return strings.ToLower(result.Folders[i].Name) < strings.ToLower(result.Folders[j].Name)
+	})
+	sort.Slice(result.Videos, func(i, j int) bool {
+		return strings.ToLower(result.Videos[i].Name) < strings.ToLower(result.Videos[j].Name)
+	})
+	return result, nil
+}
+
+// Search finds videos whose name or path contains query (case-insensitive).
+// limit <= 0 defaults to 200.
+func (l *Library) Search(query string, limit int) ([]Video, error) {
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return []Video{}, nil
+	}
+	if limit <= 0 {
+		limit = 200
+	}
+	all, err := l.List()
+	if err != nil {
+		return nil, err
+	}
+	needle := strings.ToLower(query)
+	out := make([]Video, 0)
+	for _, v := range all {
+		if strings.Contains(strings.ToLower(v.Name), needle) ||
+			strings.Contains(strings.ToLower(v.Path), needle) {
+			out = append(out, v)
+			if len(out) >= limit {
+				break
+			}
+		}
+	}
+	return out, nil
+}
+
+// resolveWithinRoot joins rel under root with escape checks.
+// allowEmpty permits "" meaning the root directory itself.
+func (l *Library) resolveWithinRoot(rel string, allowEmpty bool) (string, error) {
+	rel = strings.TrimSpace(rel)
+	rel = strings.ReplaceAll(rel, "\\", "/")
+	rel = strings.Trim(rel, "/")
+	if rel == "" {
+		if !allowEmpty {
+			return "", fmt.Errorf("%w: empty id", ErrOutsideRoot)
+		}
+		return l.root, nil
+	}
+	if rel == ".." || strings.HasPrefix(rel, "../") || strings.Contains(rel, "/../") || strings.HasSuffix(rel, "/..") {
+		return "", ErrOutsideRoot
+	}
+	for _, part := range strings.Split(rel, "/") {
+		if part == "" || part == "." || part == ".." || strings.HasPrefix(part, ".") {
+			return "", ErrOutsideRoot
+		}
+	}
+
+	joined := filepath.Join(l.root, filepath.FromSlash(rel))
+	abs, err := filepath.Abs(joined)
+	if err != nil {
+		return "", err
+	}
+	rootWithSep := l.root + string(os.PathSeparator)
+	if abs != l.root && !strings.HasPrefix(abs, rootWithSep) {
+		return "", ErrOutsideRoot
+	}
+	return abs, nil
+}
+
+func normalizeRelDir(relPath string) (string, error) {
+	rel := strings.TrimSpace(relPath)
+	rel = strings.ReplaceAll(rel, "\\", "/")
+	rel = strings.Trim(rel, "/")
+	if rel == "" {
+		return "", nil
+	}
+	if rel == ".." || strings.HasPrefix(rel, "../") || strings.Contains(rel, "/../") || strings.HasSuffix(rel, "/..") {
+		return "", ErrOutsideRoot
+	}
+	parts := strings.Split(rel, "/")
+	clean := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p == "" || p == "." {
+			continue
+		}
+		if p == ".." || strings.HasPrefix(p, ".") {
+			return "", ErrOutsideRoot
+		}
+		clean = append(clean, p)
+	}
+	return strings.Join(clean, "/"), nil
+}
+
+func parentRel(rel string) string {
+	if rel == "" {
+		return ""
+	}
+	i := strings.LastIndex(rel, "/")
+	if i < 0 {
+		return ""
+	}
+	return rel[:i]
 }
 
 // Invalidate clears the in-memory list cache.
@@ -176,16 +341,21 @@ func (l *Library) Invalidate() {
 	l.cacheErr = nil
 }
 
-// Save writes an uploaded MP4 into the video root using a sanitized basename.
-// If the target name already exists, a numeric suffix is appended.
+// Save writes an uploaded MP4 into the video root.
+// filename may be a basename or a relative path (e.g. "movies/a.mp4");
+// parent directories are created as needed. If the target exists, a numeric suffix is appended.
 func (l *Library) Save(filename string, r io.Reader) (Video, error) {
-	name, err := sanitizeUploadName(filename)
+	rel, err := sanitizeUploadRelPath(filename)
 	if err != nil {
 		return Video{}, err
 	}
 
-	dest := uniquePath(l.root, name)
-	tmp, err := os.CreateTemp(l.root, ".upload-*.tmp")
+	dest := uniquePath(l.root, rel)
+	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+		return Video{}, fmt.Errorf("create upload dir: %w", err)
+	}
+
+	tmp, err := os.CreateTemp(filepath.Dir(dest), ".upload-*.tmp")
 	if err != nil {
 		return Video{}, fmt.Errorf("create temp file: %w", err)
 	}
@@ -212,50 +382,73 @@ func (l *Library) Save(filename string, r io.Reader) (Video, error) {
 	cleanup = false
 	l.Invalidate()
 
-	rel, err := filepath.Rel(l.root, dest)
+	outRel, err := filepath.Rel(l.root, dest)
 	if err != nil {
 		return Video{}, err
 	}
-	rel = filepath.ToSlash(rel)
+	outRel = filepath.ToSlash(outRel)
 	return Video{
-		ID:   rel,
+		ID:   outRel,
 		Name: filepath.Base(dest),
-		Path: rel,
+		Path: outRel,
 		Size: written,
 	}, nil
 }
 
-func sanitizeUploadName(filename string) (string, error) {
+// sanitizeUploadRelPath accepts a basename or slash-separated relative path under the video root.
+func sanitizeUploadRelPath(filename string) (string, error) {
 	name := strings.TrimSpace(filename)
 	name = strings.ReplaceAll(name, "\\", "/")
-	name = filepath.Base(name)
-	name = strings.TrimSpace(name)
-	if name == "" || name == "." || name == ".." || strings.HasPrefix(name, ".") {
+	name = strings.Trim(name, "/")
+	if name == "" {
 		return "", ErrInvalidName
 	}
-	if strings.ContainsAny(name, "/\\") {
-		return "", ErrInvalidName
-	}
-	if !strings.EqualFold(filepath.Ext(name), ".mp4") {
-		return "", ErrNotMP4
-	}
-	for _, r := range name {
-		if r < 32 || !unicode.IsPrint(r) {
+
+	parts := strings.Split(name, "/")
+	clean := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" || part == "." {
+			continue
+		}
+		if part == ".." || strings.HasPrefix(part, ".") {
 			return "", ErrInvalidName
 		}
+		for _, r := range part {
+			if r < 32 || !unicode.IsPrint(r) {
+				return "", ErrInvalidName
+			}
+		}
+		clean = append(clean, part)
 	}
-	return name, nil
+	if len(clean) == 0 {
+		return "", ErrInvalidName
+	}
+	if !strings.EqualFold(filepath.Ext(clean[len(clean)-1]), ".mp4") {
+		return "", ErrNotMP4
+	}
+	return strings.Join(clean, "/"), nil
 }
 
-func uniquePath(root, name string) string {
-	candidate := filepath.Join(root, name)
+// uniquePath returns an absolute path under root for rel (slash-separated).
+// If the path exists, inserts _N before the extension.
+func uniquePath(root, rel string) string {
+	candidate := filepath.Join(root, filepath.FromSlash(rel))
 	if _, err := os.Stat(candidate); os.IsNotExist(err) {
 		return candidate
 	}
-	ext := filepath.Ext(name)
-	stem := strings.TrimSuffix(name, ext)
+	dir := filepath.ToSlash(filepath.Dir(rel))
+	base := filepath.Base(rel)
+	ext := filepath.Ext(base)
+	stem := strings.TrimSuffix(base, ext)
 	for i := 1; ; i++ {
-		candidate = filepath.Join(root, fmt.Sprintf("%s_%d%s", stem, i, ext))
+		name := fmt.Sprintf("%s_%d%s", stem, i, ext)
+		if dir == "." {
+			rel = name
+		} else {
+			rel = dir + "/" + name
+		}
+		candidate = filepath.Join(root, filepath.FromSlash(rel))
 		if _, err := os.Stat(candidate); os.IsNotExist(err) {
 			return candidate
 		}
