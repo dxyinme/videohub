@@ -38,7 +38,9 @@ docker compose up --build
 ## API
 
 - `GET /api/health` — 健康检查
-- `GET /api/videos` — 视频列表
+- `GET /api/browse?path=` — 当前目录（文件夹 + MP4）
+- `GET /api/search?q=` — 全局搜索（最多 200 条）
+- `GET /api/videos` — 全量列表（兼容）
 - `POST /api/videos` — 上传 MP4（`multipart` 字段 `file`，可选 `path` 保留相对目录）
 - `GET /api/stream/{id...}` — MP4 流（支持 Range）
 

@@ -45,6 +45,8 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/health", s.handleHealth)
 	mux.HandleFunc("GET /api/videos", s.handleListVideos)
+	mux.HandleFunc("GET /api/browse", s.handleBrowse)
+	mux.HandleFunc("GET /api/search", s.handleSearch)
 	mux.HandleFunc("POST /api/videos", s.handleUpload)
 	// {id...} must be terminal in Go's ServeMux, so stream uses /api/stream/{id...}.
 	mux.HandleFunc("GET /api/stream/{id...}", s.handleStream)
@@ -71,6 +73,47 @@ func (s *Server) handleListVideos(w http.ResponseWriter, _ *http.Request) {
 		resp["root"] = s.lib.Root()
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+func (s *Server) handleBrowse(w http.ResponseWriter, r *http.Request) {
+	path := r.URL.Query().Get("path")
+	result, err := s.lib.Browse(path)
+	if err != nil {
+		if errors.Is(err, library.ErrOutsideRoot) {
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
+		}
+		if errors.Is(err, library.ErrNotDir) {
+			http.Error(w, "not a directory", http.StatusBadRequest)
+			return
+		}
+		if os.IsNotExist(err) {
+			http.NotFound(w, r)
+			return
+		}
+		log.Printf("browse %q: %v", path, err)
+		http.Error(w, "failed to browse", http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query().Get("q")
+	videos, err := s.lib.Search(q, 200)
+	if err != nil {
+		log.Printf("search %q: %v", q, err)
+		http.Error(w, "failed to search", http.StatusInternalServerError)
+		return
+	}
+	if videos == nil {
+		videos = []library.Video{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"query":  q,
+		"videos": videos,
+		"limit":  200,
+	})
 }
 
 func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {

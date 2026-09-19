@@ -14,32 +14,54 @@
     </header>
 
     <main class="main">
-      <section class="player-panel">
+      <section class="panel player-panel">
         <h2 id="now-playing">未选择视频</h2>
         <video id="player" controls playsinline></video>
       </section>
 
-      <section class="list-panel">
-        <div class="list-head">
-          <h2>视频列表</h2>
-          <button type="button" id="refresh" class="btn">刷新</button>
-        </div>
-        <form id="upload-form" class="upload-form">
-          <label class="upload-label">
-            <span>选择文件（可多选）</span>
-            <input id="file-input" type="file" accept="video/mp4,.mp4" multiple />
-          </label>
-          <label class="upload-label">
-            <span>选择文件夹（自动筛选 MP4）</span>
-            <input id="folder-input" type="file" webkitdirectory directory multiple />
-          </label>
-          <p id="selection-hint" class="status">未选择文件</p>
-          <button type="submit" id="upload-btn" class="btn">上传</button>
-        </form>
-        <p id="upload-status" class="status" aria-live="polite"></p>
-        <p id="status" class="status" aria-live="polite">加载中…</p>
-        <ul id="video-list" class="video-list"></ul>
-      </section>
+      <div class="side-column">
+        <section class="panel browse-panel" aria-labelledby="browse-title">
+          <div class="panel-head">
+            <h2 id="browse-title">文件浏览</h2>
+            <button type="button" id="refresh" class="btn">刷新</button>
+          </div>
+
+          <form id="search-form" class="search-form" role="search">
+            <input
+              id="search-input"
+              type="search"
+              placeholder="搜索视频名称或路径…"
+              autocomplete="off"
+            />
+            <button type="submit" class="btn">搜索</button>
+            <button type="button" id="clear-search" class="btn btn-ghost" hidden>清除</button>
+          </form>
+
+          <nav id="breadcrumb" class="breadcrumb" aria-label="路径"></nav>
+          <p id="status" class="status" aria-live="polite">加载中…</p>
+          <ul id="entry-list" class="entry-list"></ul>
+        </section>
+
+        <section class="panel upload-panel" aria-labelledby="upload-title">
+          <div class="panel-head">
+            <h2 id="upload-title">上传</h2>
+          </div>
+          <p class="panel-desc">上传到视频根目录；带文件夹结构时会保留相对路径。</p>
+          <form id="upload-form" class="upload-form">
+            <label class="upload-label">
+              <span>选择文件（可多选）</span>
+              <input id="file-input" type="file" accept="video/mp4,.mp4" multiple />
+            </label>
+            <label class="upload-label">
+              <span>选择文件夹（自动筛选 MP4）</span>
+              <input id="folder-input" type="file" webkitdirectory directory multiple />
+            </label>
+            <p id="selection-hint" class="status">未选择文件</p>
+            <button type="submit" id="upload-btn" class="btn">上传</button>
+          </form>
+          <p id="upload-status" class="status" aria-live="polite"></p>
+        </section>
+      </div>
     </main>
   </div>
   <script src="/app.js"></script>
