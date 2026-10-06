@@ -21,7 +21,9 @@ func main() {
 		log.Fatalf("library: %v", err)
 	}
 
-	srv := api.New(lib, web.FS, api.Options{MaxUploadBytes: cfg.MaxUploadBytes})
+	srv := api.New(lib, web.FS, api.Options{
+		MaxUploadBytes: cfg.MaxUploadBytes,
+	})
 	log.Printf("videohub listening on %s (videos=%s depth=%d cache=%s max_upload=%dMB)",
 		cfg.Addr, lib.Root(), cfg.ScanDepth, cfg.ListCacheTTL, cfg.MaxUploadBytes/(1024*1024))
 

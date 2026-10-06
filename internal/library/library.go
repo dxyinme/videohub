@@ -15,14 +15,14 @@ import (
 )
 
 var (
-	ErrOutsideRoot = errors.New("path escapes video root")
-	ErrNotFile     = errors.New("path is not a regular file")
-	ErrNotDir      = errors.New("path is not a directory")
-	ErrInvalidName = errors.New("invalid filename")
-	ErrNotMP4      = errors.New("only .mp4 uploads are allowed")
+	ErrOutsideRoot      = errors.New("path escapes video root")
+	ErrNotFile          = errors.New("path is not a regular file")
+	ErrNotDir           = errors.New("path is not a directory")
+	ErrInvalidName      = errors.New("invalid filename")
+	ErrUnsupportedVideo = errors.New("unsupported video type")
 )
 
-// Video is a discovered MP4 under the configured root.
+// Video is a discovered video file under the configured root.
 type Video struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
@@ -50,10 +50,10 @@ type Library struct {
 	scanDepth int
 	cacheTTL  time.Duration
 
-	mu        sync.Mutex
-	cachedAt  time.Time
-	cached    []Video
-	cacheErr  error
+	mu       sync.Mutex
+	cachedAt time.Time
+	cached   []Video
+	cacheErr error
 }
 
 // New creates a Library rooted at videoDir (must exist and be a directory).
@@ -81,7 +81,7 @@ func (l *Library) Root() string {
 	return l.root
 }
 
-// List returns discovered MP4 files, using a short in-memory cache when enabled.
+// List returns discovered video files, using a short in-memory cache when enabled.
 func (l *Library) List() ([]Video, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -125,7 +125,7 @@ func (l *Library) scan() ([]Video, error) {
 			}
 			return nil
 		}
-		if !strings.EqualFold(filepath.Ext(name), ".mp4") {
+		if !IsVideoExt(name) {
 			return nil
 		}
 		info, infoErr := d.Info()
@@ -167,7 +167,7 @@ func (l *Library) Resolve(id string) (string, error) {
 	return abs, nil
 }
 
-// Browse lists folders and MP4 files in relPath (empty = root). Uses ReadDir only.
+// Browse lists folders and video files in relPath (empty = root). Uses ReadDir only.
 func (l *Library) Browse(relPath string) (BrowseResult, error) {
 	rel, err := normalizeRelDir(relPath)
 	if err != nil {
@@ -211,7 +211,7 @@ func (l *Library) Browse(relPath string) (BrowseResult, error) {
 			result.Folders = append(result.Folders, Folder{Name: name, Path: childRel})
 			continue
 		}
-		if !strings.EqualFold(filepath.Ext(name), ".mp4") {
+		if !IsVideoExt(name) {
 			continue
 		}
 		fi, infoErr := e.Info()
@@ -341,8 +341,8 @@ func (l *Library) Invalidate() {
 	l.cacheErr = nil
 }
 
-// Save writes an uploaded MP4 into the video root.
-// filename may be a basename or a relative path (e.g. "movies/a.mp4");
+// Save writes an uploaded video into the video root.
+// filename may be a basename or a relative path (e.g. "movies/a.mkv");
 // parent directories are created as needed. If the target exists, a numeric suffix is appended.
 func (l *Library) Save(filename string, r io.Reader) (Video, error) {
 	rel, err := sanitizeUploadRelPath(filename)
@@ -424,8 +424,8 @@ func sanitizeUploadRelPath(filename string) (string, error) {
 	if len(clean) == 0 {
 		return "", ErrInvalidName
 	}
-	if !strings.EqualFold(filepath.Ext(clean[len(clean)-1]), ".mp4") {
-		return "", ErrNotMP4
+	if !IsVideoExt(clean[len(clean)-1]) {
+		return "", ErrUnsupportedVideo
 	}
 	return strings.Join(clean, "/"), nil
 }

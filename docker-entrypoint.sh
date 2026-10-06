@@ -8,8 +8,6 @@ PGID="${PGID:-1000}"
 if [ "$(id -u)" = "0" ]; then
   mkdir -p "$VIDEO_DIR"
 
-  # Align bind-mount ownership so uploads can write into VIDEO_DIR.
-  # Falls back to world-writable if chown is blocked by the filesystem.
   if ! chown "$PUID:$PGID" "$VIDEO_DIR" 2>/dev/null; then
     chmod 777 "$VIDEO_DIR" 2>/dev/null || true
   fi

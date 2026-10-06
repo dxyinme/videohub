@@ -8,17 +8,17 @@
 
 | 能力 | 说明 |
 |------|------|
-| 视频浏览 | 群晖风格目录浏览：按路径 `ReadDir` 当前层文件夹/MP4；支持面包屑与全局名称搜索（无数据库，磁盘为真相源） |
-| 视频播放 | 浏览器内播放 MP4（HTML5 `<video>`），支持拖动进度条（Range 请求） |
-| 视频上传 | 通过页面或 API 上传 `.mp4` 到视频根目录，上传后刷新列表 |
-| Docker 部署 | 提供 `Dockerfile` 与示例 `docker-compose.yml`，挂载宿主机视频目录即可用 |
+| 视频浏览 | 群晖风格目录浏览：按路径 `ReadDir` 当前层文件夹/视频；支持面包屑与全局名称搜索（无数据库） |
+| 视频播放 | 白名单格式 Range 直出；上传者保证 HTML5 可播；AVI/RMVB 不收录，stream/upload 返回 `503` |
+| 视频上传 | 页面或 API 上传白名单格式到视频根目录 |
+| Docker 部署 | 挂载视频目录 |
 
 ### 1.2 非目标（本期不做）
 
 - 用户登录 / 权限 / 多租户
-- 转码、多码率、HLS/DASH
-- 封面图自动截取、字幕管理
+- 封面图自动截取、字幕管理、多码率套件
 - 数据库、收藏、播放历史（可后续扩展）
+- 服务端 ffmpeg / HLS 转码（由上传者事先转成浏览器可播格式）
 
 ---
 
@@ -87,14 +87,15 @@
 ```
 cmd/videohub/          # main：加载配置、注册路由、启动服务
 internal/config/       # 配置解析与校验
-internal/library/      # 扫描视频目录、生成相对路径 ID、安全 Join
+internal/library/      # 扫描、路径安全、格式白名单
 internal/api/          # HTTP handlers
 web/                   # 前端静态文件 + embed.FS
 ```
 
 ### 5.2 视频发现规则
 
-- 仅收录扩展名（大小写不敏感）：`.mp4`
+- 收录扩展名（大小写不敏感）：`.mp4` `.m4v` `.webm` `.mkv` `.mov`
+- `.avi` / `.rmvb` / `.rm` **不收录**；流/上传相关请求返回 `503`
 - 以**相对视频根目录的路径**作为视频 ID（URL 安全编码），例如 `movies/foo.mp4`
 - 忽略隐藏文件/目录（可选：以 `.` 开头的条目）
 - 扫描失败（目录不存在、无权限）时启动应报错退出或返回明确错误，避免静默空列表难排查
@@ -108,8 +109,8 @@ web/                   # 前端静态文件 + embed.FS
 | `GET` | `/api/videos` | 全量视频列表 JSON（兼容/搜索底层） |
 | `GET` | `/api/browse` | 当前目录浏览：`?path=`（空=根）；`ReadDir` 返回 folders + videos |
 | `GET` | `/api/search` | 全局搜索：`?q=`，最多 200 条 |
-| `POST` | `/api/videos` | 上传 MP4（`multipart/form-data`，字段名 `file`） |
-| `GET` | `/api/stream/{id...}` | 流式输出 MP4，支持 `Range`（Go ServeMux 要求 `{id...}` 位于路径末尾） |
+| `POST` | `/api/videos` | 上传视频（`multipart/form-data`，字段名 `file`）；AVI/RMVB → `503` |
+| `GET` | `/api/stream/{id...}` | 原文件流，支持 `Range`；Content-Type 随扩展名；AVI/RMVB → `503` |
 
 #### `GET /api/browse` 响应示例
 
@@ -145,18 +146,18 @@ web/                   # 前端静态文件 + embed.FS
 - `Content-Type: multipart/form-data`
   - 字段 `file`：文件内容（必填）
   - 字段 `path`：可选相对路径（如 `movies/a.mp4`）；因 RFC 7578，`FileName()` 会去掉目录，故用独立字段保留文件夹结构
-- 仅接受扩展名为 `.mp4` 的文件；`path`/`filename` 经净化，禁止 `..` 与隐藏段
+- 仅接受白名单视频扩展名；`path`/`filename` 经净化，禁止 `..` 与隐藏段
 - 写入视频根目录（可含子目录，自动 `MkdirAll`）；同名时自动追加 `_1`、`_2`…
 - 成功：`201` + `{"video": {...}}`；超限：`413`；非法文件名/类型：`400`
 - 上传成功后失效列表缓存
-- 前端支持多选文件与选择文件夹，自动筛选其中的 `.mp4` 后逐个上传
+- 前端支持多选文件与选择文件夹，自动筛选白名单后缀后逐个上传
 
 #### `GET /api/stream/{id...}`
 
-- `Content-Type: video/mp4`
-- 必须支持 `Accept-Ranges: bytes` 与 `206 Partial Content`，否则进度条拖动不可用
-- 校验 `id` 解码后路径仍在根目录内；越界则 `403`；不存在则 `404`；非文件则 `400`
-- 示例：`/api/stream/movies/foo.mp4`
+- `Content-Type` 按扩展名（如 `video/mp4`、`video/x-matroska`）
+- 必须支持 `Accept-Ranges: bytes` 与 `206 Partial Content`
+- 校验 `id` 仍在根目录内；越界 `403`；不存在 `404`
+- `.avi` / `.rmvb` / `.rm` 返回 `503`（不做服务端转码）
 
 可用 `http.ServeContent` 实现 Range，避免手写 Range 解析。
 
@@ -175,8 +176,8 @@ web/                   # 前端静态文件 + embed.FS
 
 1. **播放区**：独立面板，`<video controls>`，`src` 指向 `/api/stream/{id...}`。
 2. **文件浏览模块**：面包屑 + 搜索 + 当前目录条目（与上传分离）。
-3. **上传模块**：独立面板；多选文件或选文件夹（自动筛选 MP4）；成功后刷新浏览目录。
-4. **空态 / 错误态**：空文件夹、无搜索结果或接口失败时给出清晰提示。
+3. **上传模块**：独立面板；多选或选文件夹（自动筛选支持的视频后缀）。
+4. **播放**：仅直出；浏览器无法解码时给出明确错误（不回退转码）。
 
 ### 6.2 交互
 
@@ -253,7 +254,7 @@ videohub/
 - 缩略图 / ffprobe 元数据（时长、分辨率）
 - Webhook 或 `fsnotify` 监听目录变更
 - 简单 Token / Basic Auth
-- 支持更多容器格式（仍由浏览器解码能力决定）
+- 多码率 / 边转边播优化
 - 左侧完整目录树 / 旁路搜索索引（十万级）
 
 ---
@@ -262,8 +263,10 @@ videohub/
 
 - [ ] 根目录与子目录可通过面包屑/进入文件夹浏览；空文件夹可见
 - [ ] 搜索可按名称或路径找到视频
-- [ ] 点击可在页面内播放，可拖动进度条
-- [ ] 可通过页面/API 上传 `.mp4`，上传后出现在对应目录
+- [ ] `.mp4` / `.webm` / `.mkv` / `.mov` 可 Range 直出播放
+- [ ] `.avi` / `.rmvb` / `.rm` 不出现在列表；stream/upload 返回 `503`
+- [ ] 可通过页面/API 上传白名单格式，上传后出现在对应目录
 - [ ] `docker compose up` 后通过映射端口可访问
 - [ ] 请求试图访问根目录外的路径时被拒绝（404/403）
 - [ ] 不引入数据库维护目录内容
+- [ ] 不做服务端 ffmpeg/HLS 转码
