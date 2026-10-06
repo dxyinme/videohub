@@ -107,14 +107,22 @@ func TestSaveUpload(t *testing.T) {
 	}
 
 	if _, err := lib.Save("note.txt", strings.NewReader("x")); err == nil {
-		t.Fatal("expected non-mp4 rejection")
+		t.Fatal("expected non-video rejection")
+	}
+
+	mkv, err := lib.Save("clip.mkv", strings.NewReader("mkvdata"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mkv.ID != "clip.mkv" {
+		t.Fatalf("got %#v", mkv)
 	}
 
 	videos, err := lib.List()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(videos) != 3 {
+	if len(videos) != 4 {
 		t.Fatalf("list after upload: %#v", videos)
 	}
 }
@@ -128,6 +136,9 @@ func TestBrowseAndSearch(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(root, "movies", "a.mp4"), []byte("aa"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "movies", "b.mkv"), []byte("bb"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(root, "movies", "note.txt"), []byte("x"), 0o644); err != nil {
@@ -167,7 +178,7 @@ func TestBrowseAndSearch(t *testing.T) {
 	if len(movies.Folders) != 1 || movies.Folders[0].Path != "movies/empty" {
 		t.Fatalf("movies folders: %#v", movies.Folders)
 	}
-	if len(movies.Videos) != 1 || movies.Videos[0].ID != "movies/a.mp4" {
+	if len(movies.Videos) != 2 {
 		t.Fatalf("movies videos: %#v", movies.Videos)
 	}
 

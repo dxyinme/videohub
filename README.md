@@ -1,15 +1,13 @@
 # Video Hub
 
-简单的本地 MP4 视频浏览与播放服务：Go 单进程提供 API 与前端页面，支持 Docker 部署。
+本地视频浏览与播放：Go 单进程提供 API 与前端，支持 Docker。请上传 **HTML5 可播放** 格式（如 H.264 MP4 / WebM）；服务端不做 AVI/RMVB 转码。
 
 ## 快速开始
 
 ```bash
-# 准备视频目录（默认 ./videos）
 mkdir -p videos
-# 放入一些 .mp4 文件后启动
 export VIDEOHUB_VIDEO_DIR=./videos
-go run ./cmd/videohub
+go run -buildvcs=false ./cmd/videohub
 ```
 
 浏览器打开 http://localhost:8080
@@ -31,18 +29,16 @@ mkdir -p videos
 docker compose up --build
 ```
 
-默认将 `./videos` 以读写方式挂载到容器内 `/videos`（上传需要写权限）。
-
-容器启动时会按 `PUID`/`PGID`（默认 `1000:1000`）校正挂载目录属主，避免上传出现 `permission denied`。若你的宿主机用户不是 1000，请在 `docker-compose.yml` 里改成自己的 uid/gid（`id -u` / `id -g`）。
+默认将 `./videos` 挂到 `/videos`。容器启动时会按 `PUID`/`PGID`（默认 `1000:1000`）校正挂载目录属主。
 
 ## API
 
 - `GET /api/health` — 健康检查
-- `GET /api/browse?path=` — 当前目录（文件夹 + MP4）
+- `GET /api/browse?path=` — 当前目录（文件夹 + 视频）
 - `GET /api/search?q=` — 全局搜索（最多 200 条）
 - `GET /api/videos` — 全量列表（兼容）
-- `POST /api/videos` — 上传 MP4（`multipart` 字段 `file`，可选 `path` 保留相对目录）
-- `GET /api/stream/{id...}` — MP4 流（支持 Range）
+- `POST /api/videos` — 上传（`file`，可选 `path`）
+- `GET /api/stream/{id...}` — 原文件流（Range）；AVI/RMVB 返回 `503`
 
 > 无鉴权，请仅在受信任的内网使用，勿直接暴露公网。
 

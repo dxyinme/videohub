@@ -48,7 +48,6 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/browse", s.handleBrowse)
 	mux.HandleFunc("GET /api/search", s.handleSearch)
 	mux.HandleFunc("POST /api/videos", s.handleUpload)
-	// {id...} must be terminal in Go's ServeMux, so stream uses /api/stream/{id...}.
 	mux.HandleFunc("GET /api/stream/{id...}", s.handleStream)
 	mux.Handle("GET /", http.FileServer(http.FS(s.static)))
 	return mux
@@ -117,8 +116,7 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
-	// Cap total request body; stream parts with MultipartReader (no full-form buffer).
-	r.Body = http.MaxBytesReader(w, r.Body, s.maxUploadBytes+1024*1024) // multipart overhead
+	r.Body = http.MaxBytesReader(w, r.Body, s.maxUploadBytes+1024*1024)
 
 	reader, err := r.MultipartReader()
 	if err != nil {
@@ -147,7 +145,6 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 
 		switch part.FormName() {
 		case "path":
-			// Optional relative path (FileName() strips directories per RFC 7578).
 			raw, readErr := io.ReadAll(io.LimitReader(part, 4<<10))
 			_ = part.Close()
 			if readErr != nil {
@@ -157,7 +154,6 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 			relPath = strings.TrimSpace(string(raw))
 			continue
 		case "file":
-			// handled below
 		default:
 			_, _ = io.Copy(io.Discard, io.LimitReader(part, 1<<20))
 			_ = part.Close()
@@ -175,14 +171,18 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 		if filename == "" {
 			filename = part.FileName()
 		}
+		if library.UnsupportedInBrowser(filename) {
+			_ = part.Close()
+			http.Error(w, "AVI/RMVB are not supported; upload HTML5-playable video (e.g. MP4/WebM)", http.StatusServiceUnavailable)
+			return
+		}
 		limited := &io.LimitedReader{R: part, N: s.maxUploadBytes + 1}
 		video, err = s.lib.Save(filename, limited)
-		// Drain any unread bytes so the multipart parser stays consistent.
 		_, _ = io.Copy(io.Discard, part)
 		_ = part.Close()
 		if err != nil {
 			switch {
-			case errors.Is(err, library.ErrNotMP4), errors.Is(err, library.ErrInvalidName):
+			case errors.Is(err, library.ErrUnsupportedVideo), errors.Is(err, library.ErrInvalidName):
 				http.Error(w, err.Error(), http.StatusBadRequest)
 			default:
 				log.Printf("upload %q: %v", filename, err)
@@ -208,24 +208,41 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, map[string]any{"video": video})
 }
 
-func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
-	id := strings.TrimPrefix(r.PathValue("id"), "/")
+func (s *Server) resolveVideo(w http.ResponseWriter, r *http.Request, id string) (abs string, info os.FileInfo, ok bool) {
+	if library.UnsupportedInBrowser(id) {
+		http.Error(w, "AVI/RMVB are not supported in HTML5 video; convert to MP4/WebM before upload", http.StatusServiceUnavailable)
+		return "", nil, false
+	}
 	abs, err := s.lib.Resolve(id)
 	if err != nil {
 		if errors.Is(err, library.ErrOutsideRoot) {
 			http.Error(w, "forbidden", http.StatusForbidden)
-			return
+			return "", nil, false
 		}
 		if errors.Is(err, library.ErrNotFile) {
 			http.Error(w, "not a file", http.StatusBadRequest)
-			return
+			return "", nil, false
 		}
 		if os.IsNotExist(err) {
 			http.NotFound(w, r)
-			return
+			return "", nil, false
 		}
 		log.Printf("resolve %q: %v", id, err)
 		http.Error(w, "failed to open video", http.StatusInternalServerError)
+		return "", nil, false
+	}
+	st, err := os.Stat(abs)
+	if err != nil {
+		http.Error(w, "failed to stat video", http.StatusInternalServerError)
+		return "", nil, false
+	}
+	return abs, st, true
+}
+
+func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
+	id := strings.TrimPrefix(r.PathValue("id"), "/")
+	abs, stat, ok := s.resolveVideo(w, r, id)
+	if !ok {
 		return
 	}
 
@@ -241,13 +258,7 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 	}
 	defer f.Close()
 
-	stat, err := f.Stat()
-	if err != nil {
-		http.Error(w, "failed to stat video", http.StatusInternalServerError)
-		return
-	}
-
-	w.Header().Set("Content-Type", "video/mp4")
+	w.Header().Set("Content-Type", library.ContentType(id))
 	http.ServeContent(w, r, stat.Name(), stat.ModTime(), f)
 }
 

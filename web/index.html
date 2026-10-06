@@ -10,12 +10,13 @@
   <div class="layout">
     <header class="header">
       <h1>Video Hub</h1>
-      <p class="subtitle">本地 MP4 浏览与播放</p>
+      <p class="subtitle">本地视频浏览与播放</p>
     </header>
 
     <main class="main">
       <section class="panel player-panel">
         <h2 id="now-playing">未选择视频</h2>
+        <p id="play-status" class="status" aria-live="polite"></p>
         <video id="player" controls playsinline></video>
       </section>
 
@@ -46,14 +47,14 @@
           <div class="panel-head">
             <h2 id="upload-title">上传</h2>
           </div>
-          <p class="panel-desc">上传到视频根目录；带文件夹结构时会保留相对路径。</p>
+          <p class="panel-desc">上传 HTML5 可播放视频（如 H.264 MP4 / WebM）；带文件夹结构时会保留相对路径。不支持 AVI/RMVB 服务端转码。</p>
           <form id="upload-form" class="upload-form">
             <label class="upload-label">
               <span>选择文件（可多选）</span>
-              <input id="file-input" type="file" accept="video/mp4,.mp4" multiple />
+              <input id="file-input" type="file" accept="video/mp4,video/webm,video/x-matroska,video/quicktime,.mp4,.m4v,.webm,.mkv,.mov" multiple />
             </label>
             <label class="upload-label">
-              <span>选择文件夹（自动筛选 MP4）</span>
+              <span>选择文件夹（自动筛选视频）</span>
               <input id="folder-input" type="file" webkitdirectory directory multiple />
             </label>
             <p id="selection-hint" class="status">未选择文件</p>

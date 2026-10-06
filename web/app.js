@@ -6,6 +6,7 @@
   const breadcrumbEl = document.getElementById("breadcrumb");
   const player = document.getElementById("player");
   const nowPlaying = document.getElementById("now-playing");
+  const playStatusEl = document.getElementById("play-status");
   const refreshBtn = document.getElementById("refresh");
   const uploadForm = document.getElementById("upload-form");
   const fileInput = document.getElementById("file-input");
@@ -22,6 +23,7 @@
   let currentId = "";
   /** @type {{id:string,name:string,path:string,size:number}[]} */
   let visibleVideos = [];
+  let nativeErrorHandler = null;
 
   function formatSize(bytes) {
     if (!Number.isFinite(bytes) || bytes < 0) return "";
@@ -35,9 +37,23 @@
     return `${n.toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
   }
 
-  function streamURL(id) {
-    const parts = id.split("/").map(encodeURIComponent);
-    return `/api/stream/${parts.join("/")}`;
+  const VIDEO_EXT = /\.(mp4|m4v|webm|mkv|mov)$/i;
+
+  function setPlayStatus(text, isError = false) {
+    playStatusEl.textContent = text || "";
+    playStatusEl.classList.toggle("error", isError);
+  }
+
+  function extLabel(name) {
+    const m = /\.([^.]+)$/.exec(name || "");
+    return m ? m[1].toUpperCase() : "VID";
+  }
+
+  function clearPlayer() {
+    if (nativeErrorHandler) {
+      player.removeEventListener("error", nativeErrorHandler);
+      nativeErrorHandler = null;
+    }
   }
 
   function setStatus(text, isError = false) {
@@ -50,8 +66,8 @@
     uploadStatusEl.classList.toggle("error", isError);
   }
 
-  function isMp4(file) {
-    return /\.mp4$/i.test(file.name);
+  function isVideoFile(file) {
+    return VIDEO_EXT.test(file.name);
   }
 
   function uploadPath(file) {
@@ -62,13 +78,13 @@
     return file.name;
   }
 
-  function collectMp4Files() {
+  function collectVideoFiles() {
     const selected = [];
     const seen = new Set();
     for (const input of [fileInput, folderInput]) {
       const list = input.files ? Array.from(input.files) : [];
       for (const file of list) {
-        if (!isMp4(file)) continue;
+        if (!isVideoFile(file)) continue;
         const key = `${uploadPath(file)}::${file.size}::${file.lastModified}`;
         if (seen.has(key)) continue;
         seen.add(key);
@@ -79,22 +95,22 @@
   }
 
   function updateSelectionHint() {
-    const files = collectMp4Files();
+    const files = collectVideoFiles();
     const folderCount = folderInput.files ? folderInput.files.length : 0;
     const skipped = folderCount > 0
-      ? Math.max(0, folderCount - Array.from(folderInput.files || []).filter(isMp4).length)
+      ? Math.max(0, folderCount - Array.from(folderInput.files || []).filter(isVideoFile).length)
       : 0;
     if (files.length === 0) {
       selectionHintEl.textContent =
         folderCount > 0
-          ? `文件夹中未找到 MP4（已忽略 ${folderCount} 个非视频/其他文件）`
+          ? `文件夹中未找到支持的视频（已忽略 ${folderCount} 个其他文件）`
           : "未选择文件";
       return;
     }
     const total = files.reduce((sum, f) => sum + f.size, 0);
-    let text = `已选 ${files.length} 个 MP4，共 ${formatSize(total)}`;
+    let text = `已选 ${files.length} 个视频，共 ${formatSize(total)}`;
     if (skipped > 0) {
-      text += `（已自动忽略 ${skipped} 个非 MP4）`;
+      text += `（已自动忽略 ${skipped} 个非视频文件）`;
     }
     selectionHintEl.textContent = text;
   }
@@ -119,14 +135,33 @@
     history.replaceState(null, "", url);
   }
 
+  function streamURL(id) {
+    const parts = id.split("/").map(encodeURIComponent);
+    return `/api/stream/${parts.join("/")}`;
+  }
+
+  function playNative(id, autoplay) {
+    clearPlayer();
+    player.src = streamURL(id);
+    nativeErrorHandler = () => {
+      setPlayStatus("当前浏览器无法解码该视频。请上传 HTML5 可播放格式（如 H.264 MP4 / WebM）。", true);
+    };
+    player.addEventListener("error", nativeErrorHandler);
+    if (autoplay) {
+      player.play().catch(() => {});
+    }
+  }
+
   function selectVideo(video, { autoplay = true, updateURL = true } = {}) {
     if (!video || !video.id) return;
     currentId = video.id;
     nowPlaying.textContent = video.path || video.name;
-    player.src = streamURL(video.id);
-    if (autoplay) {
-      player.play().catch(() => {});
-    }
+    clearPlayer();
+    player.pause();
+    player.removeAttribute("src");
+    setPlayStatus("");
+    playNative(video.id, autoplay);
+
     for (const btn of listEl.querySelectorAll("button[data-id]")) {
       btn.classList.toggle("active", btn.dataset.id === video.id);
     }
@@ -186,8 +221,9 @@
     btn.className = "entry entry-video";
     btn.dataset.id = video.id;
     btn.innerHTML =
-      `<span class="icon" aria-hidden="true">MP4</span>` +
+      `<span class="icon" aria-hidden="true"></span>` +
       `<span class="body"><span class="name"></span><span class="meta"></span></span>`;
+    btn.querySelector(".icon").textContent = extLabel(video.name || video.path);
     btn.querySelector(".name").textContent = showPath ? video.path || video.name : video.name;
     const metaParts = [formatSize(video.size)];
     if (showPath && video.path && video.path.includes("/")) {
@@ -362,9 +398,9 @@
 
   uploadForm.addEventListener("submit", async (event) => {
     event.preventDefault();
-    const files = collectMp4Files();
+    const files = collectVideoFiles();
     if (files.length === 0) {
-      setUploadStatus("请选择 MP4 文件或包含 MP4 的文件夹。", true);
+      setUploadStatus("请选择视频文件或包含视频的文件夹（MP4/WebM/MKV/MOV）。", true);
       return;
     }
 

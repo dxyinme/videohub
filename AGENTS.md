@@ -5,9 +5,9 @@
 
 ## Overview
 
-Video Hub 是一个**前后端统一交付**的本地 MP4 视频站：单个 Go 进程同时提供 HTTP API 与静态前端（`embed.FS`），支持 Docker 部署、群晖风格目录浏览与搜索、Range 播放、流式上传（含文件夹批量）。
+Video Hub 是一个**前后端统一交付**的本地视频站：单个 Go 进程同时提供 HTTP API 与静态前端（`embed.FS`），支持 Docker 部署、群晖风格目录浏览与搜索、Range 直出、流式上传。
 
-**非目标（除非用户明确要求）：** 登录鉴权、转码/HLS、数据库、封面截取、公网暴露加固。
+**非目标（除非用户明确要求）：** 登录鉴权、数据库、封面截取、公网暴露加固、服务端 ffmpeg/HLS 转码。上传者须保证文件可被 HTML5 `<video>` 播放。
 
 ## Tech Stack
 
@@ -23,7 +23,7 @@ Video Hub 是一个**前后端统一交付**的本地 MP4 视频站：单个 Go 
 ```
 cmd/videohub/          # main：配置、启动 HTTP
 internal/config/       # 环境变量配置
-internal/library/      # 视频扫描、路径安全、落盘上传
+internal/library/      # 视频扫描、路径安全、落盘上传、格式白名单
 internal/api/          # HTTP handlers（health / list / upload / stream）
 web/                   # 前端静态资源 + embed.FS
 docs/DESIGN.md         # 设计文档（API、安全、验收）
@@ -58,11 +58,13 @@ docker compose up --build
 | `GET` | `/api/browse` | 当前目录：`?path=`（空=根），`ReadDir`，无 DB |
 | `GET` | `/api/search` | 搜索：`?q=`，基于 `List()` 缓存，默认最多 200 |
 | `GET` | `/api/videos` | 全量列表 JSON |
-| `POST` | `/api/videos` | 上传：`file` + 可选 `path`（相对路径；`FileName()` 会去目录） |
-| `GET` | `/api/stream/{id...}` | MP4 流，须支持 Range（用 `http.ServeContent`） |
+| `POST` | `/api/videos` | 上传：`file` + 可选 `path`（相对路径；`FileName()` 会去目录）；AVI/RMVB → `503` |
+| `GET` | `/api/stream/{id...}` | 原文件流，须支持 Range；Content-Type 按扩展名；AVI/RMVB → `503` |
 | `GET` | `/` | 前端静态页 |
 
 上传须**流式**（`MultipartReader`），禁止改回整表 `ParseMultipartForm` 大文件缓冲。目录浏览以文件系统为准，不要引入数据库维护文件夹内容。
+
+收录扩展名：`.mp4` `.m4v` `.webm` `.mkv` `.mov`。一律 Range 直出；不收录 AVI/RMVB/RM，也不做服务端转码。
 
 ## Backend Rules
 
@@ -79,8 +81,8 @@ docker compose up --build
 - 保持无构建链：只改 `web/index.html`、`web/app.js`、`web/style.css`。
 - 浏览用 `/api/browse` + 面包屑；搜索用 `/api/search`；URL 同步 `path`/`q`/`v`。
 - **上传与文件浏览分属独立面板**，不要把上传表单塞进浏览列表中间。
-- 上传支持多选文件与文件夹（`webkitdirectory`）；客户端筛选 `.mp4`，逐个 `POST`；带相对路径时用表单字段 `path`。
-- 播放器用 `<video controls playsinline>`，`src` 指向 `/api/stream/...`。
+- 上传支持多选文件与文件夹（`webkitdirectory`）；客户端筛选支持的视频后缀，逐个 `POST`；带相对路径时用表单字段 `path`。
+- 播放器仅用 `/api/stream/...`；解码失败时给出明确错误，不要回退到服务端转码。
 - 移动端需可用：保留 `viewport`，布局在窄屏下单列堆叠。
 - 用户可见文案可用中文；错误态要明确。
 
