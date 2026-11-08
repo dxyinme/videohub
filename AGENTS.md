@@ -54,7 +54,7 @@ docker compose up --build
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| `GET` | `/api/health` | 健康检查 |
+| `GET` | `/api/health` | 健康检查（视频目录存在/可写；异常 `503`） |
 | `GET` | `/api/browse` | 当前目录：`?path=`（空=根），`ReadDir`，无 DB |
 | `GET` | `/api/search` | 搜索：`?q=`，基于 `List()` 缓存，默认最多 200 |
 | `GET` | `/api/videos` | 全量列表 JSON |
@@ -73,6 +73,7 @@ docker compose up --build
 - **路径安全**：所有读写限制在 `VIDEO_DIR` 下；拒绝 `..`、隐藏段；上传 `path` 须净化后再 `MkdirAll`。
 - 列表可用短缓存；上传成功后必须 `Invalidate()`。
 - 流式播放必须走 `http.ServeContent`（或等价 Range 实现）。
+- HTTP 访问日志用结构化单行字段（含 `duration_ms` / `bytes`），便于对照 stream 卡顿。
 - Go 代码 `gofmt`；新增逻辑补 `internal/library` 等单测。
 - 修改配置项时同步 `README.md` / `docs/DESIGN.md` / `docker-compose.yml`。
 

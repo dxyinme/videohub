@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/dxyinme/videohub/internal/library"
 )
@@ -40,7 +41,7 @@ func New(lib *library.Library, static fs.FS, opts Options) *Server {
 	}
 }
 
-// Handler returns the root HTTP handler.
+// Handler returns the root HTTP handler with request timing logs.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/health", s.handleHealth)
@@ -50,11 +51,90 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/videos", s.handleUpload)
 	mux.HandleFunc("GET /api/stream/{id...}", s.handleStream)
 	mux.Handle("GET /", http.FileServer(http.FS(s.static)))
-	return mux
+	return withRequestLog(mux)
+}
+
+type statusWriter struct {
+	http.ResponseWriter
+	status int
+	bytes  int64
+}
+
+func (w *statusWriter) WriteHeader(code int) {
+	w.status = code
+	w.ResponseWriter.WriteHeader(code)
+}
+
+func (w *statusWriter) Write(b []byte) (int, error) {
+	n, err := w.ResponseWriter.Write(b)
+	w.bytes += int64(n)
+	return n, err
+}
+
+func (w *statusWriter) Flush() {
+	if f, ok := w.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+func withRequestLog(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		sw := &statusWriter{ResponseWriter: w, status: http.StatusOK}
+		next.ServeHTTP(sw, r)
+		log.Printf(
+			`msg=request method=%s path=%q query=%q status=%d bytes=%d duration_ms=%d remote=%q`,
+			r.Method,
+			r.URL.Path,
+			r.URL.RawQuery,
+			sw.status,
+			sw.bytes,
+			time.Since(start).Milliseconds(),
+			r.RemoteAddr,
+		)
+	})
+}
+
+// probeVideoDir reports whether the video root exists and is writable.
+func probeVideoDir(root string) (exists, writable bool, detail string) {
+	st, err := os.Stat(root)
+	if err != nil {
+		return false, false, err.Error()
+	}
+	if !st.IsDir() {
+		return false, false, "not a directory"
+	}
+	f, err := os.CreateTemp(root, ".videohub-health-*")
+	if err != nil {
+		return true, false, err.Error()
+	}
+	name := f.Name()
+	_ = f.Close()
+	if err := os.Remove(name); err != nil {
+		return true, false, err.Error()
+	}
+	return true, true, ""
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	root := s.lib.Root()
+	exists, writable, detail := probeVideoDir(root)
+	status := "ok"
+	code := http.StatusOK
+	if !exists || !writable {
+		status = "unhealthy"
+		code = http.StatusServiceUnavailable
+	}
+	resp := map[string]any{
+		"status":           status,
+		"videoDir":         root,
+		"videoDirExists":   exists,
+		"videoDirWritable": writable,
+	}
+	if detail != "" {
+		resp["detail"] = detail
+	}
+	writeJSON(w, code, resp)
 }
 
 func (s *Server) handleListVideos(w http.ResponseWriter, _ *http.Request) {
