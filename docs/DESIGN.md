@@ -105,7 +105,7 @@ web/                   # 前端静态文件 + embed.FS
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | `GET` | `/` | 前端页面 |
-| `GET` | `/api/health` | 健康检查（Docker / 编排用） |
+| `GET` | `/api/health` | 健康检查：视频目录是否存在且可写；异常 `503`（供 Docker healthcheck） |
 | `GET` | `/api/videos` | 全量视频列表 JSON（兼容/搜索底层） |
 | `GET` | `/api/browse` | 当前目录浏览：`?path=`（空=根）；`ReadDir` 返回 folders + videos |
 | `GET` | `/api/search` | 全局搜索：`?q=`，最多 200 条 |
@@ -266,7 +266,10 @@ videohub/
 - [ ] `.mp4` / `.webm` / `.mkv` / `.mov` 可 Range 直出播放
 - [ ] `.avi` / `.rmvb` / `.rm` 不出现在列表；stream/upload 返回 `503`
 - [ ] 可通过页面/API 上传白名单格式，上传后出现在对应目录
-- [ ] `docker compose up` 后通过映射端口可访问
+- [ ] `docker compose up` 后通过映射端口可访问；compose 含 healthcheck
+- [ ] `/api/health` 在视频目录缺失或不可写时返回 `503`，正常时含 exists/writable 字段
+- [ ] 请求日志含 method/path/status/bytes/duration_ms
+- [ ] README 说明 `scripts/ffmpeg_translate` 用法
 - [ ] 请求试图访问根目录外的路径时被拒绝（404/403）
 - [ ] 不引入数据库维护目录内容
 - [ ] 不做服务端 ffmpeg/HLS 转码

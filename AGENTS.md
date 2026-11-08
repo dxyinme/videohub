@@ -54,7 +54,7 @@ docker compose up --build
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| `GET` | `/api/health` | 健康检查 |
+| `GET` | `/api/health` | 健康检查（视频目录存在/可写；异常 `503`） |
 | `GET` | `/api/browse` | 当前目录：`?path=`（空=根），`ReadDir`，无 DB |
 | `GET` | `/api/search` | 搜索：`?q=`，基于 `List()` 缓存，默认最多 200 |
 | `GET` | `/api/videos` | 全量列表 JSON |
@@ -73,6 +73,7 @@ docker compose up --build
 - **路径安全**：所有读写限制在 `VIDEO_DIR` 下；拒绝 `..`、隐藏段；上传 `path` 须净化后再 `MkdirAll`。
 - 列表可用短缓存；上传成功后必须 `Invalidate()`。
 - 流式播放必须走 `http.ServeContent`（或等价 Range 实现）。
+- HTTP 访问日志用结构化单行字段（含 `duration_ms` / `bytes`），便于对照 stream 卡顿。
 - Go 代码 `gofmt`；新增逻辑补 `internal/library` 等单测。
 - 修改配置项时同步 `README.md` / `docs/DESIGN.md` / `docker-compose.yml`。
 
@@ -83,6 +84,8 @@ docker compose up --build
 - **上传与文件浏览分属独立面板**，不要把上传表单塞进浏览列表中间。
 - 上传支持多选文件与文件夹（`webkitdirectory`）；客户端筛选支持的视频后缀，逐个 `POST`；带相对路径时用表单字段 `path`。
 - 播放器仅用 `/api/stream/...`；解码失败时给出明确错误，不要回退到服务端转码。
+- 播放器外提供「上一个 / 下一个」按钮，按当前浏览或搜索列表顺序切换；列表边界禁用，不循环。
+- 移动端（粗指针）可在画面右侧上下滑动调节音量，并显示短暂音量提示。
 - 移动端需可用：保留 `viewport`，布局在窄屏下单列堆叠。
 - 用户可见文案可用中文；错误态要明确。
 

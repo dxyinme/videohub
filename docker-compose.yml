@@ -16,3 +16,9 @@ services:
     volumes:
       # 读写挂载，支持页面/API 上传
       - ./videos:/videos:rw
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/api/health"]
+      interval: 1h
+      timeout: 5s
+      retries: 3
+      start_period: 10s
