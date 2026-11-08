@@ -17,8 +17,6 @@
   const clearSearchBtn = document.getElementById("clear-search");
   const prevVideoBtn = document.getElementById("prev-video");
   const nextVideoBtn = document.getElementById("next-video");
-  const volumeZone = document.getElementById("volume-swipe-zone");
-  const volumeHud = document.getElementById("volume-hud");
 
   /** @type {"browse"|"search"} */
   let mode = "browse";
@@ -28,9 +26,6 @@
   /** @type {{id:string,name:string,path:string,size:number}[]} */
   let visibleVideos = [];
   let nativeErrorHandler = null;
-  let volumeHudTimer = 0;
-  /** @type {{ startY: number, startVolume: number, active: boolean } | null} */
-  let volumeGesture = null;
 
   function formatSize(bytes) {
     if (!Number.isFinite(bytes) || bytes < 0) return "";
@@ -176,20 +171,6 @@
     const next = visibleVideos[idx + delta];
     if (!next) return;
     selectVideo(next, { autoplay: true, updateURL: true });
-  }
-
-  function showVolumeHud(volume) {
-    const pct = Math.round(Math.max(0, Math.min(1, volume)) * 100);
-    volumeHud.hidden = false;
-    volumeHud.textContent = `音量 ${pct}%`;
-    window.clearTimeout(volumeHudTimer);
-    volumeHudTimer = window.setTimeout(() => {
-      volumeHud.hidden = true;
-    }, 900);
-  }
-
-  function clampVolume(v) {
-    return Math.max(0, Math.min(1, v));
   }
 
   function selectVideo(video, { autoplay = true, updateURL = true } = {}) {
@@ -428,42 +409,6 @@
 
   prevVideoBtn.addEventListener("click", () => playAdjacent(-1));
   nextVideoBtn.addEventListener("click", () => playAdjacent(1));
-
-  volumeZone.addEventListener(
-    "touchstart",
-    (event) => {
-      if (event.touches.length !== 1) return;
-      volumeGesture = {
-        startY: event.touches[0].clientY,
-        startVolume: clampVolume(player.volume),
-        active: true,
-      };
-    },
-    { passive: true }
-  );
-
-  volumeZone.addEventListener(
-    "touchmove",
-    (event) => {
-      if (!volumeGesture || !volumeGesture.active || event.touches.length !== 1) {
-        return;
-      }
-      event.preventDefault();
-      const dy = volumeGesture.startY - event.touches[0].clientY;
-      // 向上滑增大音量；约 180px 走满 0→1
-      const next = clampVolume(volumeGesture.startVolume + dy / 180);
-      player.volume = next;
-      player.muted = next <= 0;
-      showVolumeHud(next);
-    },
-    { passive: false }
-  );
-
-  const endVolumeGesture = () => {
-    volumeGesture = null;
-  };
-  volumeZone.addEventListener("touchend", endVolumeGesture);
-  volumeZone.addEventListener("touchcancel", endVolumeGesture);
 
   fileInput.addEventListener("change", updateSelectionHint);
   folderInput.addEventListener("change", updateSelectionHint);
