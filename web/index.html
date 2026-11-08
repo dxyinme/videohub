@@ -17,7 +17,21 @@
       <section class="panel player-panel">
         <h2 id="now-playing">未选择视频</h2>
         <p id="play-status" class="status" aria-live="polite"></p>
-        <video id="player" controls playsinline></video>
+        <div class="player-stage" id="player-stage">
+          <video id="player" controls playsinline></video>
+          <div
+            class="volume-swipe-zone"
+            id="volume-swipe-zone"
+            aria-hidden="true"
+            title="右侧上下滑动调节音量"
+          ></div>
+          <div class="volume-hud" id="volume-hud" hidden aria-live="polite"></div>
+        </div>
+        <div class="player-nav" role="group" aria-label="切换视频">
+          <button type="button" id="prev-video" class="btn" disabled>上一个</button>
+          <button type="button" id="next-video" class="btn" disabled>下一个</button>
+        </div>
+        <p class="panel-desc player-hint">手机可在画面右侧上下滑动调节音量。</p>
       </section>
 
       <div class="side-column">
